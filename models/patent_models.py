@@ -2,7 +2,7 @@
 專利相關的資料模型定義
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
@@ -45,10 +45,14 @@ class PatentSearchRequest(BaseModel):
     enable_analysis: bool = Field(default=True, description="是否啟用AI分析")
     priority: int = Field(default=5, ge=1, le=10, description="任務優先級")
     
-    @validator('keywords', 'patent_number')
-    def validate_search_criteria(cls, v, values):
+    @field_validator('keywords', 'patent_number')
+    @classmethod
+    def validate_search_criteria(cls, v, info):
         """驗證檢索條件"""
-        if not values.get('keywords') and not v:
+        # 檢查是否至少提供了關鍵字或專利號碼其中之一
+        values = info.data if hasattr(info, 'data') else {}
+        keywords = values.get('keywords')
+        if not keywords and not v:
             raise ValueError('必須提供關鍵字或專利號碼其中之一')
         return v
 
