@@ -14,11 +14,9 @@ from pathlib import Path
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 添加父目錄到路徑以便導入其他機器人
-sys.path.append(str(Path(__file__).parent.parent))
-
-from twpat_searcher.twpat_search_bot import TWPATSearchBot
-from uspto_searcher.uspto_search_bot import USPTOSearchBot
+# 導入專利檢索機器人
+from twpat_search_bot import TWPATSearchBot
+from uspto_search_bot import USPTOSearchBot
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)

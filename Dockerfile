@@ -18,17 +18,22 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     libpq-dev \
+    chromium-driver \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # 複製requirements檔案
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # 安裝Python依賴
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # 複製應用程式代碼
-COPY backend/ .
+COPY . .
+
+# 建立必要目錄
+RUN mkdir -p /app/logs /app/uploads /app/downloads
 
 # 建立非root用戶
 RUN useradd --create-home --shell /bin/bash app && \
