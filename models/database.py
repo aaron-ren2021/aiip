@@ -465,3 +465,15 @@ class TaskRepository:
             
             rows = await conn.fetch(query, user_id, limit, offset)
             return [dict(row) for row in rows]
+
+# 全域資料庫管理器實例
+db_manager = DatabaseManager()
+
+# 便利函數
+async def init_db():
+    """初始化資料庫"""
+    await db_manager.initialize()
+
+async def get_db_session():
+    """取得資料庫連線"""
+    return db_manager.get_connection()

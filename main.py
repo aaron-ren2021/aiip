@@ -56,20 +56,26 @@ rag_service = RAGService()
 @app.on_event("startup")
 async def startup_event():
     """應用程式啟動時的初始化作業"""
-    logger.info("正在啟動RPA專利比對系統...")
-    
-    # 初始化資料庫
-    await init_db()
-    
-    # 初始化Azure服務連線
-    await azure_config.initialize()
-    
-    # 初始化各項服務
-    await patent_service.initialize()
-    await rpa_service.initialize()
-    await rag_service.initialize()
-    
-    logger.info("系統啟動完成")
+    try:
+        logger.info("正在啟動RPA專利比對系統...")
+        
+        # 初始化資料庫
+        await init_db()
+        
+        # 初始化Azure服務連線
+        await azure_config.initialize()
+        
+        # 初始化各項服務
+        await patent_service.initialize()
+        await rpa_service.initialize()
+        await rag_service.initialize()
+        
+        logger.info("系統啟動完成")
+        
+    except Exception as e:
+        logger.error(f"系統啟動失敗: {str(e)}")
+        # 不要重新拋出異常，讓系統可以繼續運行，但會在健康檢查中反映問題
+        pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
