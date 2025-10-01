@@ -1,0 +1,106 @@
+# Docker 忽略檔案
+# 避免將不必要的檔案複製到Docker映像中
+
+# Git 相關
+.git
+.gitignore
+.gitattributes
+
+# 環境變數檔案
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# 依賴目錄
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE 和編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 作業系統檔案
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日誌檔案
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 運行時檔案
+*.pid
+*.seed
+*.pid.lock
+
+# 覆蓋率報告
+coverage/
+.nyc_output
+
+# 測試檔案
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 建置產物
+dist/
+build/
+*.egg-info/
+
+# 暫存檔案
+tmp/
+temp/
+.tmp/
+
+# 文件檔案
+docs/
+*.md
+README*
+CHANGELOG*
+LICENSE*
+
+# Docker 相關
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# 監控配置
+monitoring/
+
+# 下載和上傳目錄
+downloads/
+uploads/
+
+# 備份檔案
+*.bak
+*.backup
+
+# 壓縮檔案
+*.zip
+*.tar.gz
+*.rar
+
+# 開發工具配置
+.eslintrc*
+.prettierrc*
+jest.config*
+webpack.config*
+vite.config*

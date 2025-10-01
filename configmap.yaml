@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patent-rpa-config
+  namespace: patent-rpa-system
+data:
+  # 應用程式配置
+  ENVIRONMENT: "production"
+  API_BASE_URL: "https://patent-rpa-api.azurewebsites.net"
+  
+  # 資料庫配置
+  POSTGRES_HOST: "patent-rpa-postgres.postgres.database.azure.com"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "patent_rpa"
+  POSTGRES_USER: "patent_admin"
+  
+  # Redis配置
+  REDIS_HOST: "patent-rpa-redis.redis.cache.windows.net"
+  REDIS_PORT: "6380"
+  REDIS_SSL: "true"
+  
+  # Azure服務配置
+  AZURE_OPENAI_ENDPOINT: "https://patent-rpa-openai.openai.azure.com/"
+  AZURE_SEARCH_SERVICE_NAME: "patent-rpa-search"
+  AZURE_STORAGE_ACCOUNT_NAME: "patentrpastorage"
+  AZURE_STORAGE_CONTAINER_NAME: "patent-documents"
+  AZURE_KEY_VAULT_URL: "https://patent-rpa-keyvault.vault.azure.net/"
+  
+  # RPA配置
+  CHROME_OPTIONS: "--headless --no-sandbox --disable-dev-shm-usage --disable-gpu"
+  MAX_CONCURRENT_ROBOTS: "5"
+  ROBOT_TIMEOUT_SECONDS: "300"
+  MAX_RETRY_ATTEMPTS: "3"
+  
+  # 專利資料庫URL
+  TWPAT_BASE_URL: "https://twpat.tipo.gov.tw"
+  USPTO_BASE_URL: "https://ppubs.uspto.gov"
+  EPO_BASE_URL: "https://worldwide.espacenet.com"
+  WIPO_BASE_URL: "https://patentscope.wipo.int"
+  
+  # 快取配置
+  CACHE_EXPIRY_SECONDS: "3600"
+  SEARCH_CACHE_EXPIRY_SECONDS: "1800"
+  
+  # 安全性配置
+  CORS_ORIGINS: "https://patent-rpa.azurewebsites.net,https://www.patent-rpa.com"
+  RATE_LIMIT_PER_MINUTE: "100"
+  MAX_FILE_SIZE_MB: "100"

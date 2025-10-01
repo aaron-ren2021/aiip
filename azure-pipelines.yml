@@ -1,0 +1,309 @@
+# Azure DevOps CI/CD Pipeline
+# RPA自動專利比對機器人系統
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    exclude:
+    - docs/*
+    - README.md
+
+variables:
+  # Azure Container Registry
+  containerRegistry: 'patentRpaAcr.azurecr.io'
+  imageRepository: 'patent-rpa'
+  dockerfilePath: '$(Build.SourcesDirectory)'
+  tag: '$(Build.BuildId)'
+  
+  # Azure Kubernetes Service
+  azureSubscription: 'Azure-Service-Connection'
+  resourceGroupName: 'PatentRPASystemRG'
+  kubernetesCluster: 'PatentRPACluster'
+  namespace: 'patent-rpa-system'
+  
+  # Build Agent
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: 'Build and Push Images'
+  jobs:
+  - job: Build
+    displayName: 'Build Job'
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    
+    # Checkout source code
+    - checkout: self
+      fetchDepth: 1
+    
+    # Setup Node.js for frontend build
+    - task: NodeTool@0
+      displayName: 'Setup Node.js'
+      inputs:
+        versionSpec: '22.x'
+    
+    # Install frontend dependencies and build
+    - script: |
+        cd frontend
+        npm install -g pnpm
+        pnpm install --frozen-lockfile
+        pnpm run build
+      displayName: 'Build Frontend'
+    
+    # Setup Python for backend
+    - task: UsePythonVersion@0
+      displayName: 'Setup Python'
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+    
+    # Install backend dependencies
+    - script: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install Backend Dependencies'
+    
+    # Run backend tests
+    - script: |
+        cd backend
+        python -m pytest tests/ --junitxml=test-results.xml --cov=. --cov-report=xml
+      displayName: 'Run Backend Tests'
+      continueOnError: true
+    
+    # Publish test results
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: 'backend/test-results.xml'
+        failTaskOnFailedTests: false
+      condition: always()
+    
+    # Publish code coverage
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish Code Coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: 'backend/coverage.xml'
+      condition: always()
+    
+    # Docker login
+    - task: Docker@2
+      displayName: 'Login to ACR'
+      inputs:
+        command: 'login'
+        containerRegistry: $(containerRegistry)
+    
+    # Build and push backend image
+    - task: Docker@2
+      displayName: 'Build and Push Backend Image'
+      inputs:
+        command: 'buildAndPush'
+        repository: '$(imageRepository)-backend'
+        dockerfile: 'docker/backend/Dockerfile'
+        containerRegistry: $(containerRegistry)
+        tags: |
+          $(tag)
+          latest
+    
+    # Build and push frontend image
+    - task: Docker@2
+      displayName: 'Build and Push Frontend Image'
+      inputs:
+        command: 'buildAndPush'
+        repository: '$(imageRepository)-frontend'
+        dockerfile: 'docker/frontend/Dockerfile'
+        containerRegistry: $(containerRegistry)
+        tags: |
+          $(tag)
+          latest
+    
+    # Build and push RPA bots image
+    - task: Docker@2
+      displayName: 'Build and Push RPA Bots Image'
+      inputs:
+        command: 'buildAndPush'
+        repository: '$(imageRepository)-bots'
+        dockerfile: 'docker/rpa-bots/Dockerfile'
+        containerRegistry: $(containerRegistry)
+        tags: |
+          $(tag)
+          latest
+    
+    # Copy Kubernetes manifests
+    - task: CopyFiles@2
+      displayName: 'Copy K8s Manifests'
+      inputs:
+        SourceFolder: 'azure-config/k8s'
+        Contents: '**/*.yaml'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/k8s'
+    
+    # Publish artifacts
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifacts'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+
+- stage: DeployDev
+  displayName: 'Deploy to Development'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  jobs:
+  - deployment: DeployDev
+    displayName: 'Deploy to Development Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'development'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          
+          # Download artifacts
+          - download: current
+            artifact: drop
+          
+          # Replace tokens in K8s manifests
+          - task: replacetokens@5
+            displayName: 'Replace Tokens in K8s Manifests'
+            inputs:
+              rootDirectory: '$(Pipeline.Workspace)/drop/k8s'
+              targetFiles: '**/*.yaml'
+              encoding: 'auto'
+              tokenPattern: 'default'
+              writeBOM: true
+              actionOnMissing: 'warn'
+              keepToken: false
+              actionOnNoFiles: 'continue'
+              enableTransforms: false
+              useLegacyPattern: false
+              enableTelemetry: true
+          
+          # Deploy to AKS
+          - task: KubernetesManifest@0
+            displayName: 'Deploy to AKS Development'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(azureSubscription)'
+              namespace: '$(namespace)-dev'
+              manifests: |
+                $(Pipeline.Workspace)/drop/k8s/namespace.yaml
+                $(Pipeline.Workspace)/drop/k8s/configmap.yaml
+                $(Pipeline.Workspace)/drop/k8s/secret.yaml
+                $(Pipeline.Workspace)/drop/k8s/backend-deployment.yaml
+                $(Pipeline.Workspace)/drop/k8s/rpa-deployment.yaml
+                $(Pipeline.Workspace)/drop/k8s/frontend-deployment.yaml
+              containers: |
+                $(containerRegistry)/$(imageRepository)-backend:$(tag)
+                $(containerRegistry)/$(imageRepository)-frontend:$(tag)
+                $(containerRegistry)/$(imageRepository)-bots:$(tag)
+
+- stage: DeployProd
+  displayName: 'Deploy to Production'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployProd
+    displayName: 'Deploy to Production Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          
+          # Download artifacts
+          - download: current
+            artifact: drop
+          
+          # Replace tokens in K8s manifests
+          - task: replacetokens@5
+            displayName: 'Replace Tokens in K8s Manifests'
+            inputs:
+              rootDirectory: '$(Pipeline.Workspace)/drop/k8s'
+              targetFiles: '**/*.yaml'
+              encoding: 'auto'
+              tokenPattern: 'default'
+              writeBOM: true
+              actionOnMissing: 'warn'
+              keepToken: false
+              actionOnNoFiles: 'continue'
+              enableTransforms: false
+              useLegacyPattern: false
+              enableTelemetry: true
+          
+          # Deploy to AKS
+          - task: KubernetesManifest@0
+            displayName: 'Deploy to AKS Production'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(azureSubscription)'
+              namespace: '$(namespace)'
+              manifests: |
+                $(Pipeline.Workspace)/drop/k8s/namespace.yaml
+                $(Pipeline.Workspace)/drop/k8s/configmap.yaml
+                $(Pipeline.Workspace)/drop/k8s/secret.yaml
+                $(Pipeline.Workspace)/drop/k8s/backend-deployment.yaml
+                $(Pipeline.Workspace)/drop/k8s/rpa-deployment.yaml
+                $(Pipeline.Workspace)/drop/k8s/frontend-deployment.yaml
+              containers: |
+                $(containerRegistry)/$(imageRepository)-backend:$(tag)
+                $(containerRegistry)/$(imageRepository)-frontend:$(tag)
+                $(containerRegistry)/$(imageRepository)-bots:$(tag)
+          
+          # Run smoke tests
+          - script: |
+              echo "Running smoke tests..."
+              # Add your smoke test commands here
+              curl -f https://patent-rpa.your-domain.com/api/health || exit 1
+              echo "Smoke tests passed!"
+            displayName: 'Run Smoke Tests'
+            continueOnError: false
+
+- stage: PostDeploy
+  displayName: 'Post Deployment Tasks'
+  dependsOn: 
+  - DeployDev
+  - DeployProd
+  condition: always()
+  jobs:
+  - job: Notifications
+    displayName: 'Send Notifications'
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    
+    # Send Teams notification
+    - task: microsoftteams@1
+      displayName: 'Send Teams Notification'
+      inputs:
+        webhookUrl: '$(TeamsWebhookUrl)'
+        message: |
+          **RPA專利比對系統部署完成**
+          
+          **Build ID:** $(Build.BuildId)
+          **Branch:** $(Build.SourceBranchName)
+          **Status:** $(Agent.JobStatus)
+          **Deployed Images:**
+          - Backend: $(containerRegistry)/$(imageRepository)-backend:$(tag)
+          - Frontend: $(containerRegistry)/$(imageRepository)-frontend:$(tag)
+          - RPA Bots: $(containerRegistry)/$(imageRepository)-bots:$(tag)
+      condition: always()
+    
+    # Update deployment status
+    - script: |
+        echo "Deployment completed at $(date)"
+        echo "Build ID: $(Build.BuildId)"
+        echo "Images deployed:"
+        echo "- Backend: $(containerRegistry)/$(imageRepository)-backend:$(tag)"
+        echo "- Frontend: $(containerRegistry)/$(imageRepository)-frontend:$(tag)"
+        echo "- RPA Bots: $(containerRegistry)/$(imageRepository)-bots:$(tag)"
+      displayName: 'Log Deployment Status'

@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: patent-rpa-bots
+  namespace: patent-rpa-system
+  labels:
+    app: patent-rpa-bots
+    component: rpa
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: patent-rpa-bots
+  template:
+    metadata:
+      labels:
+        app: patent-rpa-bots
+        component: rpa
+    spec:
+      containers:
+      - name: rpa-bots
+        image: patentRpaAcr.azurecr.io/patent-rpa-bots:latest
+        ports:
+        - containerPort: 8001
+          name: http
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: ENVIRONMENT
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: REDIS_PASSWORD
+        - name: BACKEND_API_URL
+          value: "http://patent-rpa-backend-service"
+        - name: CHROME_OPTIONS
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: CHROME_OPTIONS
+        - name: MAX_CONCURRENT_ROBOTS
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: MAX_CONCURRENT_ROBOTS
+        - name: ROBOT_TIMEOUT_SECONDS
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: ROBOT_TIMEOUT_SECONDS
+        - name: TWPAT_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: TWPAT_BASE_URL
+        - name: USPTO_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: USPTO_BASE_URL
+        - name: EPO_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: EPO_BASE_URL
+        - name: WIPO_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: WIPO_BASE_URL
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: downloads
+          mountPath: /app/downloads
+        - name: shm
+          mountPath: /dev/shm
+        securityContext:
+          capabilities:
+            add:
+              - SYS_ADMIN
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: downloads
+        persistentVolumeClaim:
+          claimName: patent-rpa-downloads-pvc
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
+      imagePullSecrets:
+      - name: acr-secret
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: patent-rpa-bots-service
+  namespace: patent-rpa-system
+  labels:
+    app: patent-rpa-bots
+spec:
+  selector:
+    app: patent-rpa-bots
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8001
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: patent-rpa-downloads-pvc
+  namespace: patent-rpa-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: azurefile

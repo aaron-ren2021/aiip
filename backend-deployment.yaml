@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: patent-rpa-backend
+  namespace: patent-rpa-system
+  labels:
+    app: patent-rpa-backend
+    component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: patent-rpa-backend
+  template:
+    metadata:
+      labels:
+        app: patent-rpa-backend
+        component: api
+    spec:
+      containers:
+      - name: backend
+        image: patentRpaAcr.azurecr.io/patent-rpa-backend:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: ENVIRONMENT
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: REDIS_PASSWORD
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: AZURE_OPENAI_ENDPOINT
+        - name: AZURE_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: AZURE_OPENAI_API_KEY
+        - name: AZURE_SEARCH_SERVICE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: patent-rpa-config
+              key: AZURE_SEARCH_SERVICE_NAME
+        - name: AZURE_SEARCH_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: AZURE_SEARCH_API_KEY
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: patent-rpa-secrets
+              key: JWT_SECRET_KEY
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: uploads
+          mountPath: /app/uploads
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: patent-rpa-uploads-pvc
+      imagePullSecrets:
+      - name: acr-secret
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: patent-rpa-backend-service
+  namespace: patent-rpa-system
+  labels:
+    app: patent-rpa-backend
+spec:
+  selector:
+    app: patent-rpa-backend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: patent-rpa-uploads-pvc
+  namespace: patent-rpa-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: azurefile

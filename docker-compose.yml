@@ -1,0 +1,229 @@
+# Docker Compose 配置檔案
+# RPA自動專利比對機器人系統
+version: '3.8'
+
+services:
+  # PostgreSQL 資料庫
+  postgres:
+    image: postgres:15-alpine
+    container_name: patent-rpa-postgres
+    environment:
+      POSTGRES_DB: patent_rpa
+      POSTGRES_USER: patent_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-patent_secure_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - patent-rpa-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patent_user -d patent_rpa"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis 快取
+  redis:
+    image: redis:7-alpine
+    container_name: patent-rpa-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - patent-rpa-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 後端API服務
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: patent-rpa-backend
+    environment:
+      - DATABASE_URL=postgresql://patent_user:${POSTGRES_PASSWORD:-patent_secure_password}@postgres:5432/patent_rpa
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_SEARCH_SERVICE_NAME=${AZURE_SEARCH_SERVICE_NAME}
+      - AZURE_SEARCH_API_KEY=${AZURE_SEARCH_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your_jwt_secret_key_here}
+      - ENVIRONMENT=production
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    ports:
+      - "8000:8000"
+    networks:
+      - patent-rpa-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RPA機器人服務
+  rpa-bots:
+    build:
+      context: .
+      dockerfile: docker/rpa-bots/Dockerfile
+    container_name: patent-rpa-bots
+    environment:
+      - DATABASE_URL=postgresql://patent_user:${POSTGRES_PASSWORD:-patent_secure_password}@postgres:5432/patent_rpa
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      - BACKEND_API_URL=http://backend:8000
+      - CHROME_OPTIONS=--headless --no-sandbox --disable-dev-shm-usage --disable-gpu
+      - ENVIRONMENT=production
+    volumes:
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+      - /dev/shm:/dev/shm
+    ports:
+      - "8001:8001"
+    networks:
+      - patent-rpa-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/health')"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+
+  # 前端React應用
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    container_name: patent-rpa-frontend
+    ports:
+      - "80:80"
+    networks:
+      - patent-rpa-network
+    depends_on:
+      - backend
+      - rpa-bots
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Elasticsearch (用於日誌分析)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: patent-rpa-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - patent-rpa-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Kibana (日誌視覺化)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: patent-rpa-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - patent-rpa-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus (監控)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: patent-rpa-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - patent-rpa-network
+    restart: unless-stopped
+
+  # Grafana (監控視覺化)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: patent-rpa-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3000:3000"
+    networks:
+      - patent-rpa-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+# 網路配置
+networks:
+  patent-rpa-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 資料卷配置
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
